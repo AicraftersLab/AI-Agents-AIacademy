@@ -1,4 +1,4 @@
-# Learning Style Profiling Agent
+# Profiling Agent
 
 ## Executive Summary
 
@@ -18,6 +18,18 @@ The system integrates learning style assessment with competency-based evaluation
 The diagram below shows the architecture of the Learning Style Profiling Agent, detailing its core components and their interactions.
 
 ![Learning Style Profiling Agent Architecture](assets/Architecture_Profiling_Agent.png)
+
+
+### Dependencies
+
+- **`streamlit`**: Used to create an interactive and user-friendly web interface.
+- **`os`**: Handles environment-related operations such as accessing environment variables.
+- **`dotenv`**: Loads environment variables from a `.env` file to keep sensitive data like API keys secure.
+- **`time`**: Manages time-related functions like delays or timestamps.
+- **`random`**: Introduces randomness where needed, such as shuffling questions or responses.
+- **`json`**: Parses and manipulates JSON data, useful for config files or API responses.
+- **`typing`**: Adds type hints for better readability and code maintenance (`Dict`, `List`, `Tuple`).
+- **`requests`**: Makes HTTP requests to external APIs for data retrieval or interaction.
 
 
 ## Pedagogical Framework
