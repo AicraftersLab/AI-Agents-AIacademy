@@ -32,6 +32,11 @@ The diagram below shows the architecture of the Learning Style Profiling Agent, 
 - **`requests`**: Makes HTTP requests to external APIs for data retrieval or interaction.
 
 
+**Remark**: To use the Groq API, you must create a `.env` file in the root directory and include your API key in the following format:
+```
+GROQ_API_KEY=your_api_key
+```
+
 ## Pedagogical Framework
 
 ### Felder-Silverman Learning Style Model Implementation
