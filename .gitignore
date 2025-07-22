@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environment
+venv/
+env/
+Scripts/
+Lib/
+pyvenv.cfg
+
+# Environment Variables (CRITIQUE pour votre projet)
+.env
+.env.local
+
+# Flask
+instance/
+.webassets-cache
+
+# Base de données (IMPORTANT)
+*.db
+*.sqlite
+quiz_app.db
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp.env 
