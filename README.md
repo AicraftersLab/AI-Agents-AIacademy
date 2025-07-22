@@ -98,6 +98,8 @@ To help learners stay aware of their journey, this agent continuously:
 It supports self-awareness, goal-setting, and long-term retention by giving learners a clear picture of their improvement and gaps.
 
 ---
+## Architecture:
+![Platform Overview](Architecture_globale.png)
 
 ## Summary
 
