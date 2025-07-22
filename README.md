@@ -99,7 +99,7 @@ It supports self-awareness, goal-setting, and long-term retention by giving lear
 
 ---
 ## Architecture:
-![Platform Overview](Architecture_globale.png)
+![Platform Overview](Architecture_Globale.png)
 
 ## Summary
 
