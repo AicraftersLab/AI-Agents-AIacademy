@@ -13,17 +13,17 @@ The application is built using Streamlit for the frontend, providing an intuitiv
 - Team Formation: Intelligent pairing and role assignment for optimal collaboration.
 - Challenge Management: Create, join, and submit solutions for collaborative challenges.
 - Community Features: Discussion forums.
-- 
+  
 # Technologies Used
 Python 3
-Streamlit – Rapid web application framework for data apps.
-Google Gemini AI – AI-powered challenge generation and personalized feedback.
-Pandas – Data manipulation and analysis.
-Plotly – Interactive data visualization.
-NumPy – Numerical operations.
-Requests – HTTP requests for external data.
-Dataclasses & Enums – For structured data modeling.
-Other Libraries: hashlib, random, datetime, etc
+- Streamlit – Rapid web application framework for data apps.
+- Google Gemini AI – AI-powered challenge generation and personalized feedback.
+- Pandas – Data manipulation and analysis.
+- Plotly – Interactive data visualization.
+- NumPy – Numerical operations.
+- Requests – HTTP requests for external data.
+- Dataclasses & Enums – For structured data modeling.
+- Other Libraries: hashlib, random, datetime, etc
 # Configurer l’API Gemini
 Crée un fichier .env à la racine du projet :
 GEMINI_API_KEY=cle_api_ici
