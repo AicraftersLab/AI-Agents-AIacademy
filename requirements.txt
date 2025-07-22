@@ -1,4 +1,6 @@
-streamlit
-google-generativeai
-python-dotenv
-PyPDF2
+streamlit - For the web application framework
+pandas - For data manipulation and analysis
+plotly - For interactive data visualizations
+numpy - For numerical operations
+google-generativeai - For Gemini AI integration
+requests - For HTTP requests
