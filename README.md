@@ -14,6 +14,9 @@ pip install -r requirements.txt
 Streamlit 
 Google Gemini API 
 PyMuPDF (fitz)
+# Configurer l’API Gemini
+Crée un fichier .env à la racine du projet :
+GEMINI_API_KEY=cle_api_ici
 
 # Exemple d’utilisation
 L’étudiant charge un fichier PDF ou txt contenant le cours.
