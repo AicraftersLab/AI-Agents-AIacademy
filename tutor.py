@@ -1,941 +1,959 @@
 import streamlit as st
-import google.generativeai as genai
-import os
-from dotenv import load_dotenv
-import PyPDF2
-from io import StringIO
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
 import json
+import hashlib
 import random
-from datetime import datetime
+import numpy as np
+from typing import Dict, List, Tuple
+from dataclasses import dataclass, field
+from enum import Enum
+import fitz  # PyMuPDF
+import subprocess
+import os
+import requests
 
-# Configuration
-load_dotenv()
+# Imports locaux
+from config import CATEGORIES, DIFFICULTY_LEVELS, POINTS_CONFIG, USER_LEVELS, BADGES, COLORS, CHART_CONFIG, LIMITS, HELP_MESSAGES
+from sample_data import initialize_sample_data
 
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+# Configuration de la page
+st.set_page_config(
+    page_title="Agent Social Learning Collaboratif",
+    page_icon="🤝",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    
-MODEL_CONFIG = {
-    'temperature': 0.3,
-    'top_p': 0.8,
-    'top_k': 40,
-    'max_output_tokens': 1500,
-}
+# Enums et classes pour le profiling et la collaboration
+class LearningStyle(Enum):
+    VISUAL = "Visuel"
+    AUDITIF = "Auditif"
+    KINESTHESIQUE = "Kinesthésique"
+    LECTURE_ECRITURE = "Lecture/Écriture"
 
-SAFETY_SETTINGS = [
-    {
-        "category": "HARM_CATEGORY_HARASSMENT",
-        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-    },
-    {
-        "category": "HARM_CATEGORY_HATE_SPEECH",
-        "threshold": "BLOCK_MEDIUM_AND_ABOVE"
-    }
-]
+class PersonalityType(Enum):
+    LEADER = "Leader"
+    COLLABORATEUR = "Collaborateur"
+    ANALYTIQUE = "Analytique"
+    CREATIF = "Créatif"
 
-class CourseProcessor:
-    """Classe pour traiter différents types de fichiers de cours"""
-    
+class CollaborationRole(Enum):
+    CHEF_EQUIPE = "Chef d'équipe"
+    RECHERCHEUR = "Rechercheur"
+    DEVELOPPEUR = "Développeur"
+    TESTEUR = "Testeur"
+    COMMUNICATEUR = "Communicateur"
+
+@dataclass
+class LearnerProfile:
+    username: str
+    learning_style: LearningStyle
+    personality_type: PersonalityType
+    skill_levels: Dict[str, int] = field(default_factory=dict)
+    collaboration_history: List[str] = field(default_factory=list)
+    preferred_subjects: List[str] = field(default_factory=list)
+    availability_hours: List[int] = field(default_factory=list)
+    language_preference: str = "Français"
+    motivation_level: int = 5
+    last_activity: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class User:
+    username: str
+    email: str
+    points: int = 0
+    challenges_completed: List[str] = field(default_factory=list)
+    challenges_created: List[str] = field(default_factory=list)
+    level: str = "Débutant"
+    badges: List[str] = field(default_factory=list)
+    joined_at: datetime = field(default_factory=datetime.now)
+
+@dataclass
+class CollaborativeChallenge:
+    id: str
+    title: str
+    description: str
+    category: str
+    difficulty: str
+    required_skills: List[str]
+    team_size: int
+    roles_needed: List[CollaborationRole]
+    points_reward: int
+    creator: str
+    deadline: datetime
+    participants: List[str] = field(default_factory=list)
+    teams: List[Dict] = field(default_factory=list)
+    submissions: Dict = field(default_factory=dict)
+    feedback_given: Dict = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.now)
+    comments: List[Dict] = field(default_factory=list)
+
+class SocialLearningAgent:
     def __init__(self):
-        self.content = ""
-        self.sections = []
-        self.course_title = ""
+        self.challenges = {}
+        self.users = {}
+        self.profiles = {}
+        self.teams = {}
+        self.load_data()
     
-    def load_txt_file(self, uploaded_file):
-        """Charge un fichier TXT"""
-        try:
-            stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-            content = stringio.read()
-            return content
-        except Exception as e:
-            st.error(f"Erreur lors de la lecture du fichier TXT: {str(e)}")
-            return ""
+    def load_data(self):
+        """Charger les données depuis la session"""
+        if 'challenges' not in st.session_state:
+            st.session_state.challenges = {}
+        if 'users' not in st.session_state:
+            st.session_state.users = {}
+        if 'profiles' not in st.session_state:
+            st.session_state.profiles = {}
+        if 'teams' not in st.session_state:
+            st.session_state.teams = {}
+        if 'current_user' not in st.session_state:
+            st.session_state.current_user = None
+            
+        self.challenges = st.session_state.challenges
+        self.users = st.session_state.users
+        self.profiles = st.session_state.profiles
+        self.teams = st.session_state.teams
     
-    def load_pdf_file(self, uploaded_file):
-        """Charge un fichier PDF"""
-        try:
-            pdf_reader = PyPDF2.PdfReader(uploaded_file)
-            content = ""
-            for page in pdf_reader.pages:
-                content += page.extract_text() + "\n"
-            return content
-        except Exception as e:
-            st.error(f"Erreur lors de la lecture du fichier PDF: {str(e)}")
-            return ""
+    def save_data(self):
+        """Sauvegarder les données dans la session"""
+        st.session_state.challenges = self.challenges
+        st.session_state.users = self.users
+        st.session_state.profiles = self.profiles
+        st.session_state.teams = self.teams
     
-    def process_content(self, content):
-        """Traite le contenu du cours"""
-        self.content = content
-        self.sections = [section.strip() for section in content.split('\n\n') if section.strip()]
+    def analyze_learner_profile(self, username: str) -> LearnerProfile:
+        """Analyser et créer le profil d'un apprenant"""
+        if username in self.profiles:
+            return self.profiles[username]
         
-        # Extrait le titre du cours
-        lines = content.split('\n')
-        if lines:
-            self.course_title = lines[0][:100] + "..." if len(lines[0]) > 100 else lines[0]
+        # Simulation d'analyse basée sur l'historique (en réalité, ce serait plus sophistiqué)
+        learning_styles = list(LearningStyle)
+        personality_types = list(PersonalityType)
         
-        return len(self.sections) > 0
+        profile = LearnerProfile(
+            username=username,
+            learning_style=random.choice(learning_styles),
+            personality_type=random.choice(personality_types),
+            skill_levels={cat: random.randint(1, 5) for cat in CATEGORIES},
+            preferred_subjects=random.sample(CATEGORIES, k=random.randint(2, 4)),
+            availability_hours=random.sample(range(8, 20), k=random.randint(4, 8)),
+            motivation_level=random.randint(3, 5)
+        )
+        
+        self.profiles[username] = profile
+        self.save_data()
+        return profile
     
-    def get_relevant_content(self, query, max_sections=3):
-        """Trouve le contenu pertinent basé sur la requête"""
-        if not self.sections:
-            return [self.content[:2000]]
+    def create_personalized_challenge(self, participants: List[str]) -> CollaborativeChallenge:
+        """Créer un défi collaboratif personnalisé basé sur les profils"""
+        profiles = [self.analyze_learner_profile(user) for user in participants]
         
-        query_words = query.lower().split()
-        relevant_sections = []
+        # Analyse des compétences communes et complémentaires
+        common_subjects = set(profiles[0].preferred_subjects)
+        for profile in profiles[1:]:
+            common_subjects = common_subjects.intersection(set(profile.preferred_subjects))
         
-        # Recherche par mots-clés
-        for section in self.sections:
-            section_lower = section.lower()
-            score = sum(1 for word in query_words if word in section_lower)
-            if score > 0:
-                relevant_sections.append((section, score))
+        if not common_subjects:
+            common_subjects = {random.choice(CATEGORIES)}
         
-        # Trie par pertinence
-        relevant_sections.sort(key=lambda x: x[1], reverse=True)
+        category = random.choice(list(common_subjects))
+        avg_skill = np.mean([profile.skill_levels.get(category, 1) for profile in profiles])
         
-        # Retourne les sections les plus pertinentes
-        result = [section[0] for section in relevant_sections[:max_sections]]
+        difficulty = "Facile" if avg_skill < 2 else "Moyen" if avg_skill < 4 else "Difficile"
         
-        # Si aucune section pertinente, retourne les premières sections
-        if not result:
-            result = self.sections[:max_sections]
-        
-        return result
-
-class SummaryGenerator:
-    """Générateur de résumés adaptatifs selon le niveau de l'étudiant"""
-    
-    def __init__(self, model):
-        self.model = model
-        self.summary_styles = {
-            'debutant': {
-                'style': 'simple et accessible',
-                'focus': 'concepts de base, définitions claires, exemples concrets',
-                'length': 'court (300-500 mots)',
-                'tone': 'encourageant et bienveillant',
-                'structure': 'points essentiels numérotés'
-            },
-            'intermediaire': {
-                'style': 'structuré et analytique',
-                'focus': 'relations entre concepts, applications pratiques, analyses',
-                'length': 'modéré (500-800 mots)',
-                'tone': 'informatif et engageant',
-                'structure': 'sections thématiques avec sous-points'
-            },
-            'avance': {
-                'style': 'critique et synthétique',
-                'focus': 'enjeux complexes, perspectives multiples, implications',
-                'length': 'détaillé (800-1200 mots)',
-                'tone': 'académique et nuancé',
-                'structure': 'analyse approfondie avec perspectives critiques'
-            }
+        # Défis personnalisés selon la catégorie et le niveau
+        challenge_templates = {
+            "Programmation": [
+                "Développer une application collaborative de gestion de tâches",
+                "Créer un jeu multijoueur simple",
+                "Construire une API REST avec documentation"
+            ],
+            "Design": [
+                "Concevoir l'interface d'une application mobile",
+                "Créer une identité visuelle complète",
+                "Développer un prototype d'UX innovant"
+            ],
+            "Data Science": [
+                "Analyser un dataset et présenter les insights",
+                "Créer un modèle prédictif collaboratif",
+                "Développer un dashboard interactif"
+            ]
         }
-    
-    def generate_summary(self, course_content, level, topic=None, summary_type='general'):
-        if not self.model:
-            return None
         
-        try:
-            # Prépare le contenu à résumer
-            if topic:
-                # Filtre par sujet si spécifié
-                relevant_sections = []
-                for section in course_content.sections:
-                    if topic.lower() in section.lower():
-                        relevant_sections.append(section)
-                content_text = '\n\n'.join(relevant_sections[:5])
+        title = random.choice(challenge_templates.get(category, ["Défi collaboratif personnalisé"]))
+        
+        challenge_id = hashlib.md5(f"{title}{datetime.now()}".encode()).hexdigest()[:8]
+        
+        challenge = CollaborativeChallenge(
+            id=challenge_id,
+            title=title,
+            description=f"Défi collaboratif en {category} adapté à votre niveau ({difficulty})",
+            category=category,
+            difficulty=difficulty,
+            required_skills=[category],
+            team_size=len(participants),
+            roles_needed=self._determine_roles_needed(profiles),
+            points_reward=len(participants) * 20,  # Points base pour défis collaboratifs
+            creator="SocialLearningAgent",
+            deadline=datetime.now() + timedelta(days=7),
+            participants=participants
+        )
+        
+        self.challenges[challenge_id] = challenge
+        self.save_data()
+        return challenge
+    
+    def _determine_roles_needed(self, profiles: List[LearnerProfile]) -> List[CollaborationRole]:
+        """Déterminer les rôles nécessaires basés sur les profils"""
+        roles = []
+        personality_types = [profile.personality_type for profile in profiles]
+        
+        if PersonalityType.LEADER in personality_types:
+            roles.append(CollaborationRole.CHEF_EQUIPE)
+        if PersonalityType.ANALYTIQUE in personality_types:
+            roles.append(CollaborationRole.RECHERCHEUR)
+        if PersonalityType.CREATIF in personality_types:
+            roles.append(CollaborationRole.DEVELOPPEUR)
+        
+        # Compléter avec des rôles par défaut
+        while len(roles) < len(profiles):
+            available_roles = [r for r in CollaborationRole if r not in roles]
+            if available_roles:
+                roles.append(random.choice(available_roles))
             else:
-                # Utilise tout le contenu disponible
-                content_text = course_content.content
-            
-            # Limite la taille du contenu pour éviter les erreurs
-            if len(content_text) > 4000:
-                content_text = content_text[:4000] + "..."
-            
-            # Crée le prompt pour générer le résumé
-            prompt = self._create_summary_prompt(content_text, level, topic, summary_type)
-            
-            # Génère le résumé
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(**MODEL_CONFIG),
-                safety_settings=SAFETY_SETTINGS
-            )
-            
-            return {
-                'content': response.text,
-                'level': level,
-                'topic': topic,
-                'type': summary_type,
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            
-        except Exception as e:
-            st.error(f"Erreur lors de la génération du résumé : {str(e)}")
-            return None
-    
-    def _create_summary_prompt(self, content, level, topic=None, summary_type='general'):
-        """Crée le prompt pour générer un résumé adapté"""
-        style_config = self.summary_styles[level]
-        
-        topic_instruction = f" sur le sujet '{topic}'" if topic else ""
-        
-        prompt = f"""
-Tu es un expert en pédagie adaptative. Crée un résumé{topic_instruction} basé EXCLUSIVEMENT sur le contenu du cours fourni, adapté au niveau {level.upper()}.
-
-CONTENU DU COURS :
-{content}
-
-NIVEAU CIBLE : {level.upper()}
-STYLE REQUIS : {style_config['style']}
-FOCUS : {style_config['focus']}
-LONGUEUR : {style_config['length']}
-TONE : {style_config['tone']}
-STRUCTURE : {style_config['structure']}
-
-INSTRUCTIONS SPÉCIFIQUES POUR LE NIVEAU {level.upper()} :
-"""
-
-        if level == 'debutant':
-            prompt += """
-- Utilise un vocabulaire simple et accessible
-- Explique les termes techniques avec des définitions claires
-- Donne des exemples concrets et familiers
-- Structure avec des puces ou numérotation
-- Évite les concepts trop abstraits
-- Sois encourageant et rassurant
-- Mets l'accent sur la compréhension de base
-"""
-        
-        elif level == 'intermediaire':
-            prompt += """
-- Utilise un vocabulaire précis mais accessible
-- Établis des liens entre les différents concepts
-- Inclus des applications pratiques
-- Structure en sections thématiques
-- Propose des analyses modérées
-- Équilibre théorie et pratique
-- Encourage l'approfondissement
-"""
-        
-        else:  # avancé
-            prompt += """
-- Utilise un vocabulaire académique approprié
-- Présente les enjeux complexes et les débats
-- Analyse les implications et conséquences
-- Structure avec une logique argumentative
-- Inclus des perspectives critiques multiples
-- Établis des connexions interdisciplinaires
-- Stimule la réflexion critique
-"""
-
-        prompt += f"""
-
-FORMAT DE RÉPONSE :
-# 📚 Résumé du Cours - Niveau {level.title()}
-
-[Ton résumé ici, respectant exactement les critères ci-dessus]
-
-## 🎯 Points Clés à Retenir
-[Liste des points essentiels]
-
-## 💡 Pour Aller Plus Loin
-[Suggestions adaptées au niveau]
-
-Assure-toi que le résumé soit parfaitement adapté au niveau {level} et respecte le style et la longueur demandés.
-"""
-        
-        return prompt
-
-class ExerciseGenerator:
-    """Générateur d'exercices adaptatifs basé sur le cours"""
-    
-    def __init__(self, model):
-        self.model = model
-        self.exercise_types = {
-            'debutant': ['QCM', 'Vrai/Faux', 'Completion'],
-            'intermediaire': ['QCM', 'Questions courtes', 'Analyse', 'Application'],
-            'avance': ['Analyse critique', 'Synthèse', 'Problème complexe', 'Étude de cas']
-        }
-    
-    def generate_exercises(self, course_content, level, num_exercises=3, topic=None):
-        """Génère des exercices basés sur le cours et le niveau"""
-        if not self.model:
-            return []
-        
-        try:
-            # Sélectionne le contenu pertinent
-            if topic:
-                # Filtre par sujet si spécifié
-                relevant_sections = []
-                for section in course_content.sections:
-                    if topic.lower() in section.lower():
-                        relevant_sections.append(section)
-                content_text = '\n\n'.join(relevant_sections[:2])
-            else:
-                # Utilise tout le contenu disponible
-                content_text = '\n\n'.join(course_content.sections[:3])
-            
-            if len(content_text) > 2500:
-                content_text = content_text[:2500] + "..."
-            
-            # Définit les types d'exercices selon le niveau
-            exercise_types = self.exercise_types[level]
-            
-            # Crée le prompt pour générer les exercices
-            prompt = self._create_exercise_prompt(content_text, level, num_exercises, exercise_types)
-            
-            # Génère les exercices
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(**MODEL_CONFIG),
-                safety_settings=SAFETY_SETTINGS
-            )
-            
-            # Parse la réponse
-            exercises = self._parse_exercise_response(response.text, level)
-            return exercises
-            
-        except Exception as e:
-            st.error(f"Erreur lors de la génération des exercices : {str(e)}")
-            return []
-    
-    def _create_exercise_prompt(self, content, level, num_exercises, exercise_types):
-        """Crée le prompt pour générer des exercices"""
-        level_descriptions = {
-            'debutant': 'questions simples de compréhension et de mémorisation',
-            'intermediaire': 'questions d\'application et d\'analyse modérée',
-            'avance': 'questions complexes d\'analyse critique et de synthèse'
-        }
-        
-        prompt = f"""
-Tu es un expert en pédagogie. Crée {num_exercises} exercices de niveau {level} basés EXCLUSIVEMENT sur le contenu du cours fourni.
-
-CONTENU DU COURS :
-{content}
-
-NIVEAU : {level.upper()}
-DESCRIPTION : {level_descriptions[level]}
-TYPES D'EXERCICES AUTORISÉS : {', '.join(exercise_types)}
-
-INSTRUCTIONS :
-1. Base-toi UNIQUEMENT sur le contenu du cours fourni
-2. Adapte la difficulté au niveau {level}
-3. Varie les types d'exercices
-4. Pour chaque exercice, fournis :
-   - Type d'exercice
-   - Question/Énoncé
-   - Options de réponse (si applicable)
-   - Réponse correcte
-   - Explication détaillée
-
-FORMAT DE RÉPONSE (respecte exactement ce format) :
-EXERCICE 1:
-Type: [Type d'exercice]
-Question: [Question complète]
-Options: [Si QCM: A) option1, B) option2, C) option3, D) option4]
-Réponse: [Réponse correcte]
-Explication: [Explication détaillée]
-
-EXERCICE 2:
-[Même format...]
-
-Assure-toi que les exercices testent la compréhension du cours et sont adaptés au niveau {level}.
-"""
-        return prompt
-    
-    def _parse_exercise_response(self, response_text, level):
-        """Parse la réponse de l'IA pour extraire les exercices"""
-        exercises = []
-        
-        try:
-            # Divise par exercices
-            exercise_blocks = response_text.split('EXERCICE ')[1:]  # Retire la partie avant le premier exercice
-            
-            for i, block in enumerate(exercise_blocks):
-                exercise = {
-                    'id': i + 1,
-                    'level': level,
-                    'type': '',
-                    'question': '',
-                    'options': [],
-                    'correct_answer': '',
-                    'explanation': '',
-                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                }
-                
-                # Parse chaque champ
-                lines = block.strip().split('\n')
-                current_field = None
-                
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith('Type:'):
-                        exercise['type'] = line.replace('Type:', '').strip()
-                    elif line.startswith('Question:'):
-                        exercise['question'] = line.replace('Question:', '').strip()
-                        current_field = 'question'
-                    elif line.startswith('Options:'):
-                        options_text = line.replace('Options:', '').strip()
-                        if options_text:
-                            # Parse les options (format: A) option1, B) option2, etc.)
-                            exercise['options'] = self._parse_options(options_text)
-                        current_field = 'options'
-                    elif line.startswith('Réponse:'):
-                        exercise['correct_answer'] = line.replace('Réponse:', '').strip()
-                        current_field = 'answer'
-                    elif line.startswith('Explication:'):
-                        exercise['explanation'] = line.replace('Explication:', '').strip()
-                        current_field = 'explanation'
-                    elif current_field == 'question' and line:
-                        exercise['question'] += ' ' + line
-                    elif current_field == 'explanation' and line:
-                        exercise['explanation'] += ' ' + line
-                
-                if exercise['question']:  # Ajoute seulement si la question n'est pas vide
-                    exercises.append(exercise)
-        
-        except Exception as e:
-            st.error(f"Erreur lors du parsing des exercices : {str(e)}")
-        
-        return exercises
-    
-    def _parse_options(self, options_text):
-        """Parse les options d'un QCM"""
-        options = []
-        
-        # Cherche les patterns A) B) C) D) ou 1) 2) 3) 4)
-        import re
-        patterns = [
-            r'[A-D]\)\s*([^,]+)',  # A) option,
-            r'\d\)\s*([^,]+)',     # 1) option,
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, options_text)
-            if matches:
-                options = [match.strip() for match in matches]
                 break
-        
-        # Si aucun pattern trouvé, divise par virgules
-        if not options:
-            options = [opt.strip() for opt in options_text.split(',') if opt.strip()]
-        
-        return options[:4]  # Max 4 options
-
-class EducationalChatbot:
-    """Chatbot éducatif utilisant l'API Gemini"""
+                
+        return roles[:len(profiles)]
     
-    def __init__(self):
-        self.model = genai.GenerativeModel('gemini-1.5-flash') if GEMINI_API_KEY else None
-        self.course_processor = CourseProcessor()
-        self.exercise_generator = ExerciseGenerator(self.model)
-        self.summary_generator = SummaryGenerator(self.model)
-        self.conversation_history = []
+    def form_optimal_pairs(self, available_users: List[str]) -> List[Tuple[str, str]]:
+        """Former des binômes optimaux basés sur la compatibilité"""
+        if len(available_users) < 2:
+            return []
+        
+        profiles = [self.analyze_learner_profile(user) for user in available_users]
+        pairs = []
+        used_users = set()
+        
+        # Algorithme simple de formation de pairs basé sur la complémentarité
+        for i, user1 in enumerate(available_users):
+            if user1 in used_users:
+                continue
+                
+            best_match = None
+            best_score = -1
+            
+            for j, user2 in enumerate(available_users[i+1:], i+1):
+                if user2 in used_users:
+                    continue
+                
+                compatibility_score = self._calculate_compatibility(profiles[i], profiles[j])
+                if compatibility_score > best_score:
+                    best_score = compatibility_score
+                    best_match = user2
+            
+            if best_match:
+                pairs.append((user1, best_match))
+                used_users.add(user1)
+                used_users.add(best_match)
+        
+        return pairs
     
-    def load_course(self, uploaded_file):
-        """Charge un cours depuis un fichier uploadé"""
-        if uploaded_file is None:
-            return False
+    def _calculate_compatibility(self, profile1: LearnerProfile, profile2: LearnerProfile) -> float:
+        """Calculer la compatibilité entre deux profils"""
+        score = 0.0
         
-        file_extension = uploaded_file.name.split('.')[-1].lower()
+        # Complémentarité des types de personnalité
+        if profile1.personality_type != profile2.personality_type:
+            score += 2.0
         
-        if file_extension == 'txt':
-            content = self.course_processor.load_txt_file(uploaded_file)
-        elif file_extension == 'pdf':
-            content = self.course_processor.load_pdf_file(uploaded_file)
+        # Sujets en commun
+        common_subjects = set(profile1.preferred_subjects).intersection(set(profile2.preferred_subjects))
+        score += len(common_subjects) * 1.5
+        
+        # Créneaux horaires compatibles
+        common_hours = set(profile1.availability_hours).intersection(set(profile2.availability_hours))
+        score += len(common_hours) * 0.5
+        
+        # Niveaux de compétence complémentaires
+        for subject in common_subjects:
+            skill_diff = abs(profile1.skill_levels.get(subject, 1) - profile2.skill_levels.get(subject, 1))
+            if skill_diff == 1:  # Légère différence = bon pour l'entraide
+                score += 1.0
+        
+        return score
+    
+    def assign_roles_to_team(self, challenge_id: str, team_members: List[str]) -> Dict[str, CollaborationRole]:
+        """Attribuer des rôles aux membres d'une équipe"""
+        if challenge_id not in self.challenges:
+            return {}
+        
+        challenge = self.challenges[challenge_id]
+        profiles = [self.analyze_learner_profile(user) for user in team_members]
+        role_assignments = {}
+        
+        # Attribution basée sur les types de personnalité et compétences
+        available_roles = challenge.roles_needed.copy()
+        
+        for i, member in enumerate(team_members):
+            profile = profiles[i]
+            best_role = None
+            
+            if profile.personality_type == PersonalityType.LEADER and CollaborationRole.CHEF_EQUIPE in available_roles:
+                best_role = CollaborationRole.CHEF_EQUIPE
+            elif profile.personality_type == PersonalityType.ANALYTIQUE and CollaborationRole.RECHERCHEUR in available_roles:
+                best_role = CollaborationRole.RECHERCHEUR
+            elif profile.personality_type == PersonalityType.CREATIF and CollaborationRole.DEVELOPPEUR in available_roles:
+                best_role = CollaborationRole.DEVELOPPEUR
+            
+            if best_role and best_role in available_roles:
+                role_assignments[member] = best_role
+                available_roles.remove(best_role)
+            elif available_roles:
+                role_assignments[member] = available_roles.pop(0)
+        
+        # Sauvegarder les attributions dans le défi
+        if challenge_id not in self.teams:
+            self.teams[challenge_id] = {}
+        
+        team_id = f"team_{len(self.teams[challenge_id])}"
+        self.teams[challenge_id][team_id] = {
+            'members': team_members,
+            'roles': role_assignments,
+            'created_at': datetime.now()
+        }
+        
+        self.save_data()
+        return role_assignments
+    
+    def collect_results_and_feedback(self, challenge_id: str, team_id: str, 
+                                   results: Dict, peer_feedback: Dict) -> Dict:
+        """Recueillir les résultats et donner un feedback"""
+        if challenge_id not in self.challenges:
+            return {}
+        
+        challenge = self.challenges[challenge_id]
+        
+        # Analyser la performance de l'équipe
+        team_feedback = {
+            'collaboration_score': self._evaluate_collaboration(peer_feedback),
+            'technical_score': self._evaluate_technical_results(results),
+            'individual_feedback': {},
+            'team_feedback': "",
+            'recommendations': []
+        }
+        
+        # Feedback individuel basé sur les rôles et contributions
+        if challenge_id in self.teams and team_id in self.teams[challenge_id]:
+            team_info = self.teams[challenge_id][team_id]
+            
+            for member in team_info['members']:
+                individual_feedback = self._generate_individual_feedback(
+                    member, team_info['roles'].get(member), results, peer_feedback
+                )
+                team_feedback['individual_feedback'][member] = individual_feedback
+        
+        # Feedback général de l'équipe
+        team_feedback['team_feedback'] = self._generate_team_feedback(results, peer_feedback)
+        
+        # Recommandations pour l'amélioration
+        team_feedback['recommendations'] = self._generate_recommendations(challenge_id, results, peer_feedback)
+        
+        # Sauvegarder le feedback
+        challenge.feedback_given[team_id] = team_feedback
+        self.save_data()
+        
+        return team_feedback
+    
+    def _evaluate_collaboration(self, peer_feedback: Dict) -> float:
+        """Évaluer la qualité de la collaboration"""
+        if not peer_feedback:
+            return 3.0
+        
+        scores = []
+        for feedback in peer_feedback.values():
+            if isinstance(feedback, dict) and 'collaboration_rating' in feedback:
+                scores.append(feedback['collaboration_rating'])
+        
+        return np.mean(scores) if scores else 3.0
+    
+    def _evaluate_technical_results(self, results: Dict) -> float:
+        """Évaluer la qualité technique des résultats"""
+        # Simulation d'évaluation technique
+        criteria = ['completeness', 'quality', 'innovation', 'presentation']
+        total_score = 0
+        
+        for criterion in criteria:
+            score = results.get(criterion, 3.0)
+            total_score += score
+        
+        return total_score / len(criteria)
+    
+    def _generate_individual_feedback(self, member: str, role: CollaborationRole, 
+                                    results: Dict, peer_feedback: Dict) -> str:
+        """Générer un feedback individuel personnalisé"""
+        profile = self.profiles.get(member)
+        if not profile:
+            return "Feedback non disponible"
+        
+        feedback_parts = []
+        
+        # Feedback basé sur le rôle
+        role_feedback = {
+            CollaborationRole.CHEF_EQUIPE: "Excellent leadership et coordination de l'équipe.",
+            CollaborationRole.RECHERCHEUR: "Recherche approfondie et analyse pertinente.",
+            CollaborationRole.DEVELOPPEUR: "Implémentation créative et technique solide.",
+            CollaborationRole.TESTEUR: "Tests rigoureux et attention aux détails.",
+            CollaborationRole.COMMUNICATEUR: "Communication claire et présentation efficace."
+        }
+        
+        if role:
+            feedback_parts.append(role_feedback.get(role, "Bonne contribution dans votre rôle."))
+        
+        # Feedback basé sur le style d'apprentissage
+        if profile.learning_style == LearningStyle.VISUAL:
+            feedback_parts.append("Vos représentations visuelles ont enrichi le projet.")
+        elif profile.learning_style == LearningStyle.AUDITIF:
+            feedback_parts.append("Votre participation aux discussions a été précieuse.")
+        
+        return " ".join(feedback_parts)
+    
+    def _generate_team_feedback(self, results: Dict, peer_feedback: Dict) -> str:
+        """Générer un feedback d'équipe"""
+        collaboration_score = self._evaluate_collaboration(peer_feedback)
+        technical_score = self._evaluate_technical_results(results)
+        
+        if collaboration_score >= 4 and technical_score >= 4:
+            return "Excellente collaboration et résultats techniques remarquables ! L'équipe a démontré une synergie parfaite."
+        elif collaboration_score >= 3 and technical_score >= 3:
+            return "Bonne collaboration avec des résultats satisfaisants. Quelques améliorations possibles identifiées."
         else:
-            st.error("Format de fichier non supporté. Utilisez TXT ou PDF.")
-            return False
+            return "La collaboration peut être améliorée. Concentrez-vous sur la communication et la coordination."
+    
+    def _generate_recommendations(self, challenge_id: str, results: Dict, peer_feedback: Dict) -> List[str]:
+        """Générer des recommandations d'amélioration"""
+        recommendations = []
         
-        if content:
-            return self.course_processor.process_content(content)
+        collaboration_score = self._evaluate_collaboration(peer_feedback)
+        technical_score = self._evaluate_technical_results(results)
+        
+        if collaboration_score < 3:
+            recommendations.append("Améliorer la communication entre les membres de l'équipe")
+            recommendations.append("Organiser des réunions régulières pour suivre les progrès")
+        
+        if technical_score < 3:
+            recommendations.append("Approfondir la recherche avant l'implémentation")
+            recommendations.append("Demander de l'aide aux mentors pour les aspects techniques")
+        
+        recommendations.append("Continuer à travailler en équipe pour développer vos compétences collaboratives")
+        
+        return recommendations
+    
+    def create_user(self, username: str, email: str) -> bool:
+        """Créer un nouvel utilisateur"""
+        if username not in self.users:
+            self.users[username] = User(username, email)
+            self.save_data()
+            return True
         return False
     
-    def create_system_prompt(self, user_question, relevant_content):
-        """Crée le prompt système pour Gemini"""
-        system_prompt = f"""
-Tu es un assistant pédagogique expert et bienveillant. Tu dois aider l'étudiant en te basant EXCLUSIVEMENT sur le contenu du cours fourni.
-
-CONTENU DU COURS PERTINENT :
-{relevant_content}
-
-RÈGLES IMPORTANTES :
-1. Base tes réponses UNIQUEMENT sur le contenu du cours fourni ci-dessus
-2. Si l'information demandée n'est pas dans le cours, réponds : "Cette information n'est pas couverte dans le cours fourni"
-3. Sois pédagogique, clair et encourageant
-4. Utilise des exemples tirés du cours quand c'est possible
-5. Structure ta réponse de manière logique avec des titres et sous-titres si nécessaire
-6. Si l'étudiant a besoin de clarifications, demande des précisions
-7. Encourage toujours l'apprentissage et propose des exercices si approprié
-
-QUESTION DE L'ÉTUDIANT : {user_question}
-
-Réponds de manière claire, structurée et pédagogique :
-"""
-        return system_prompt
+    def create_challenge(self, title: str, description: str, category: str, 
+                        difficulty: str, points: int, creator: str, deadline: datetime = None):
+        """Créer un nouveau défi standard"""
+        challenge_id = hashlib.md5(f"{title}{creator}{datetime.now()}".encode()).hexdigest()[:8]
+        challenge = CollaborativeChallenge(
+            id=challenge_id,
+            title=title,
+            description=description,
+            category=category,
+            difficulty=difficulty,
+            required_skills=[category],
+            team_size=2,  # Par défaut binôme
+            roles_needed=[CollaborationRole.CHEF_EQUIPE, CollaborationRole.DEVELOPPEUR],
+            points_reward=points,
+            creator=creator,
+            deadline=deadline if deadline else datetime.now() + timedelta(days=7)
+        )
+        self.challenges[challenge_id] = challenge
+        self.save_data()
+        return challenge_id
     
-    def generate_response(self, user_question):
-        """Génère une réponse basée sur le cours"""
-        if not self.model:
-            return "⚠️ Clé API Gemini non configurée. Veuillez ajouter votre clé API dans un fichier .env"
-        
-        try:
-            # Trouve le contenu pertinent
-            relevant_content = self.course_processor.get_relevant_content(user_question)
-            
-            if not relevant_content:
-                return "❌ Aucun contenu de cours n'est disponible. Veuillez charger un fichier de cours."
-            
-            # Limite la taille du contenu
-            content_text = '\n\n'.join(relevant_content)
-            if len(content_text) > 3000:
-                content_text = content_text[:3000] + "..."
-            
-            # Crée le prompt
-            prompt = self.create_system_prompt(user_question, content_text)
-            
-            # Génère la réponse avec Gemini
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(**MODEL_CONFIG),
-                safety_settings=SAFETY_SETTINGS
-            )
-            
-            # Sauvegarde dans l'historique
-            self.conversation_history.append({
-                'question': user_question,
-                'response': response.text
+    def join_challenge(self, challenge_id: str, username: str) -> bool:
+        """Rejoindre un défi"""
+        if challenge_id in self.challenges and username not in self.challenges[challenge_id].participants:
+            self.challenges[challenge_id].participants.append(username)
+            self.save_data()
+            return True
+        return False
+    
+    def submit_solution(self, challenge_id: str, username: str, solution: str) -> bool:
+        """Soumettre une solution"""
+        if challenge_id in self.challenges:
+            self.challenges[challenge_id].submissions[username] = {
+                'solution': solution,
+                'submitted_at': datetime.now()
+            }
+            self.save_data()
+            return True
+        return False
+    
+    def add_comment(self, challenge_id: str, username: str, comment: str) -> bool:
+        """Ajouter un commentaire"""
+        if challenge_id in self.challenges:
+            self.challenges[challenge_id].comments.append({
+                'username': username,
+                'comment': comment,
+                'timestamp': datetime.now()
             })
-            
-            return response.text
-            
-        except Exception as e:
-            return f"❌ Erreur lors de la génération de la réponse : {str(e)}"
+            self.save_data()
+            return True
+        return False
+    
+    def get_leaderboard(self) -> pd.DataFrame:
+        """Obtenir le classement"""
+        users_data = []
+        for username, user in self.users.items():
+            users_data.append({
+                'Utilisateur': username,
+                'Points': user.points,
+                'Défis Complétés': len(user.challenges_completed),
+                'Niveau': user.level,
+                'Badges': len(user.badges)
+            })
+        df = pd.DataFrame(users_data)
+        if not df.empty:
+            return df.sort_values('Points', ascending=False)
+        return df
 
-def display_exercise(exercise, exercise_index):
-    """Affiche un exercice avec interaction"""
-    st.markdown(f"###  Exercice {exercise['id']} - {exercise['type']} ({exercise['level'].title()})")
-    st.markdown(f"**Question :** {exercise['question']}")
+# Initialiser l'agent
+@st.cache_resource
+def get_agent():
+    return SocialLearningAgent()
+
+agent = get_agent()
+
+# Fonction d'initialisation du session state
+def initialize_session_state():
+    """Initialiser toutes les variables de session state"""
+    if 'current_user' not in st.session_state:
+        st.session_state.current_user = None
+    if 'challenges' not in st.session_state:
+        st.session_state.challenges = {}
+    if 'users' not in st.session_state:
+        st.session_state.users = {}
+    if 'profiles' not in st.session_state:
+        st.session_state.profiles = {}
+    if 'teams' not in st.session_state:
+        st.session_state.teams = {}
+
+# Interface utilisateur
+def main():
+    # Initialiser le session state en premier
+    initialize_session_state()
     
-    user_answer = None
+    st.title("🎓 Agent Social Learning - Défis Collaboratifs")
     
-    # Interface selon le type d'exercice
-    if exercise['options'] and len(exercise['options']) > 1:
-        # QCM ou choix multiple
-        user_answer = st.radio(
-            "Choisissez votre réponse :",
-            exercise['options'],
-            key=f"exercise_{exercise_index}_{exercise['id']}"
-        )
-    elif 'vrai' in exercise['type'].lower() or 'faux' in exercise['type'].lower():
-        # Vrai/Faux
-        user_answer = st.radio(
-            "Votre réponse :",
-            ['Vrai', 'Faux'],
-            key=f"exercise_{exercise_index}_{exercise['id']}"
-        )
+    # Sidebar pour la navigation
+    with st.sidebar:
+        st.image("https://via.placeholder.com/150x150/4CAF50/white?text=SL", width=150)
+        st.title("Navigation")
+        
+        # Authentification simple
+        if st.session_state.current_user is None:
+            st.subheader("🔐 Connexion")
+            username = st.text_input("Nom d'utilisateur")
+            email = st.text_input("Email")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Se connecter"):
+                    if username and email:
+                        if username not in agent.users:
+                            agent.create_user(username, email)
+                        st.session_state.current_user = username
+                        st.rerun()
+            
+            with col2:
+                if st.button("Créer compte"):
+                    if username and email:
+                        if agent.create_user(username, email):
+                            st.session_state.current_user = username
+                            st.success("Compte créé!")
+                            st.rerun()
+                        else:
+                            st.error("Utilisateur existe déjà")
+        else:
+            st.success(f"Connecté: {st.session_state.current_user}")
+            if st.button("Déconnexion"):
+                st.session_state.current_user = None
+                st.rerun()
+            
+            st.divider()
+            
+            # Bouton pour charger les données d'exemple
+            if st.button("📊 Charger Données d'Exemple"):
+                num_users, num_challenges = initialize_sample_data(agent)
+                st.success(f"Données chargées: {num_users} utilisateurs, {num_challenges} défis")
+                st.rerun()
+            
+            # Menu principal
+            menu = st.selectbox(
+                "🎯 Menu Principal",
+                ["Dashboard", "Défis Disponibles", "Mes Défis", "Créer un Défi", 
+                 "Classement", "Profil", "Communauté"]
+            )
+    
+    # Contenu principal
+    if st.session_state.current_user is None:
+        st.info("👈 Veuillez vous connecter pour accéder à l'application")
+        show_welcome_page()
     else:
-        # Question ouverte
-        user_answer = st.text_area(
-            "Votre réponse :",
-            key=f"exercise_{exercise_index}_{exercise['id']}",
-            height=100
-        )
+        if menu == "Dashboard":
+            show_dashboard()
+        elif menu == "Défis Disponibles":
+            show_available_challenges()
+        elif menu == "Mes Défis":
+            show_my_challenges()
+        elif menu == "Créer un Défi":
+            show_create_challenge()
+        elif menu == "Classement":
+            show_leaderboard()
+        elif menu == "Profil":
+            show_profile()
+        elif menu == "Communauté":
+            show_community()
+
+def show_welcome_page():
+    """Page d'accueil"""
+    st.markdown("""
+    ## 🌟 Bienvenue dans l'Agent Social Learning
     
-    # Boutons d'action
+    ### Qu'est-ce que le Social Learning ?
+    Le Social Learning est une approche pédagogique qui favorise l'apprentissage par l'interaction sociale,
+    la collaboration et le partage d'expériences entre apprenants.
+    
+    ### 🎯 Fonctionnalités principales:
+    - **Défis Collaboratifs**: Participez à des défis créés par la communauté
+    - **Système de Points**: Gagnez des points en complétant des défis
+    - **Classements**: Comparez vos performances avec d'autres apprenants
+    - **Badges et Niveaux**: Débloquez des récompenses selon vos progrès
+    - **Communauté**: Échangez et collaborez avec d'autres apprenants
+    
+    ### 🚀 Pour commencer:
+    1. Créez votre compte ou connectez-vous
+    2. Explorez les défis disponibles
+    3. Rejoignez un défi qui vous intéresse
+    4. Collaborez et apprenez avec la communauté!
+    """)
+
+def show_dashboard():
+    """Dashboard principal"""
+    current_user = st.session_state.current_user
+    user = agent.users.get(current_user)
+    
+    st.header(f"📊 Dashboard - {current_user}")
+    
+    # Statistiques personnelles
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Points Total", user.points if user else 0)
+    
+    with col2:
+        st.metric("Défis Complétés", len(user.challenges_completed) if user else 0)
+    
+    with col3:
+        st.metric("Niveau", user.level if user else "Débutant")
+    
+    with col4:
+        st.metric("Badges", len(user.badges) if user else 0)
+    
+    # Graphiques
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button(f"✅ Vérifier", key=f"check_{exercise_index}_{exercise['id']}"):
-            if user_answer:
-                st.session_state[f"show_answer_{exercise_index}_{exercise['id']}"] = True
-            else:
-                st.warning("Veuillez fournir une réponse avant de vérifier.")
+        st.subheader("📈 Évolution des Points")
+        # Simuler des données d'évolution
+        dates = pd.date_range(start='2024-01-01', periods=30, freq='D')
+        points = [i * 10 + (i % 7) * 5 for i in range(30)]
+        df_evolution = pd.DataFrame({'Date': dates, 'Points': points})
+        
+        fig = px.line(df_evolution, x='Date', y='Points', title="Évolution des points")
+        st.plotly_chart(fig, use_container_width=True)
     
     with col2:
-        if st.button(f"💡 Voir la réponse", key=f"show_{exercise_index}_{exercise['id']}"):
-            st.session_state[f"show_answer_{exercise_index}_{exercise['id']}"] = True
+        st.subheader("🎯 Défis par Catégorie")
+        categories = ['Programmation', 'Mathématiques', 'Science', 'Langues', 'Art']
+        values = [8, 5, 3, 4, 2]
+        
+        fig = px.pie(values=values, names=categories, title="Participation par catégorie")
+        st.plotly_chart(fig, use_container_width=True)
     
-    # Affichage de la réponse et explication
-    if st.session_state.get(f"show_answer_{exercise_index}_{exercise['id']}", False):
-        st.markdown("---")
-        
-        if user_answer:
-            # Évaluation simple de la réponse
-            is_correct = False
-            if exercise['options']:
-                is_correct = user_answer.lower().strip() in exercise['correct_answer'].lower()
-            else:
-                # Pour les questions ouvertes, on affiche juste la réponse attendue
-                st.info(f"**Votre réponse :** {user_answer}")
-        
-        st.success(f"**✅ Réponse correcte :** {exercise['correct_answer']}")
-        
-        if exercise['explanation']:
-            st.info(f"**💡 Explication :** {exercise['explanation']}")
-        
-        if user_answer and exercise['options']:
-            if is_correct:
-                st.balloons()
-                st.success("🎉 Excellente réponse !")
-            else:
-                st.error(" Ce n'est pas la bonne réponse. Relisez l'explication ci-dessus.")
-
-def display_summary(summary):
-    """Affiche un résumé généré"""
-    if summary:
-        st.markdown("---")
-        st.subheader(f" Résumé - Niveau {summary['level'].title()}")
-        
-        # Métadonnées
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.caption(f" Niveau : {summary['level'].title()}")
-        with col2:
-            if summary['topic']:
-                st.caption(f" Sujet : {summary['topic']}")
-        with col3:
-            st.caption(f" Généré : {summary['timestamp']}")
-        
-        # Contenu du résumé
-        st.markdown(summary['content'])
-        
-        # Boutons d'action
-        st.markdown("---")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button(" Télécharger le résumé"):
-                # Crée le contenu à télécharger
-                download_content = f"""
-# Résumé de Cours - Niveau {summary['level'].title()}
-Généré le {summary['timestamp']}
-{f"Sujet: {summary['topic']}" if summary['topic'] else ""}
-
-{summary['content']}
-"""
-                st.download_button(
-                    label=" Télécharger (Markdown)",
-                    data=download_content,
-                    file_name=f"resume_cours_{summary['level']}_{summary['timestamp'][:10]}.md",
-                    mime="text/markdown"
-                )
-        
-        with col2:
-            if st.button(" Régénérer"):
-                st.session_state.regenerate_summary = True
-                st.rerun()
-        
-        with col3:
-            if st.button(" Créer des exercices basés sur ce résumé"):
-                st.session_state.exercises_from_summary = True
-                st.rerun()
-
-def main():
-    # Configuration de la page
-    st.set_page_config(
-        page_title=" Agent tutorat IA",
-        page_icon="🎓",
-        layout="wide"
-    )
-    
-    # Titre principal
-    st.title("🎓Agent tutorat IA")
-    st.markdown("### Votre assistant personnel pour l'apprentissage et la pratique")
-    
-    # Vérification de la clé API
-    if not GEMINI_API_KEY:
-        st.error("⚠️ Clé API Gemini manquante ! Créez un fichier .env avec GEMINI_API_KEY=votre_cle")
-        st.info("Obtenez votre clé API gratuite sur : https://makersuite.google.com")
-        return
-    
-    # Initialisation du chatbot
-    if 'chatbot' not in st.session_state:
-        st.session_state.chatbot = EducationalChatbot()
-    
-    # Initialisation des états
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
-    if 'course_loaded' not in st.session_state:
-        st.session_state.course_loaded = False
-    if 'generated_exercises' not in st.session_state:
-        st.session_state.generated_exercises = []
-    if 'generated_summary' not in st.session_state:
-        st.session_state.generated_summary = None
-    if 'student_level' not in st.session_state:
-        st.session_state.student_level = 'intermediaire'
-    
-    # Sidebar pour la configuration
-    with st.sidebar:
-        st.header(" Configuration")
-        
-        # Chargement du cours
-        st.subheader("Chargement du cours")
-        uploaded_file = st.file_uploader(
-            "Choisissez votre fichier de cours",
-            type=['txt', 'pdf'],
-            help="Formats supportés : TXT, PDF"
-        )
-        
-        if uploaded_file is not None:
-            if st.button(" Charger le cours", type="primary"):
-                with st.spinner("Chargement du cours..."):
-                    if st.session_state.chatbot.load_course(uploaded_file):
-                        st.session_state.course_loaded = True
-                        st.success("✅ Cours chargé avec succès !")
-                        # Reset des messages, exercices et résumés
-                        st.session_state.messages = []
-                        st.session_state.generated_exercises = []
-                        st.session_state.generated_summary = None
-                    else:
-                        st.error(" Erreur lors du chargement du cours")
-        
-        # Statut du cours
-        if st.session_state.course_loaded:
-            st.success(" Cours actif")
-            course_title = st.session_state.chatbot.course_processor.course_title
-            if course_title:
-                st.caption(f"**Titre :** {course_title}")
-        else:
-            st.warning(" Aucun cours chargé")
-        
-        st.markdown("---")
-        
-        # Configuration du niveau d'étudiant
-        st.subheader(" Profil étudiant")
-        st.session_state.student_level = st.selectbox(
-            "Votre niveau :",
-            ['debutant', 'intermediaire', 'avance'],
-            index=['debutant', 'intermediaire', 'avance'].index(st.session_state.student_level)
-        )
-        
-        level_descriptions = {
-            'debutant': " Concepts de base, mémorisation",
-            'intermediaire': " Application, analyse modérée",
-            'avance': " Analyse critique, synthèse complexe"
-        }
-        
-        st.caption(level_descriptions[st.session_state.student_level])
-        
-        st.markdown("---")
-        
-        # Actions rapides
-        st.subheader(" Actions rapides")
-        
-        if st.button(" Nouvelle conversation"):
-            st.session_state.messages = []
-            st.rerun()
-        
-        if st.button(" Effacer les exercices"):
-            st.session_state.generated_exercises = []
-            st.rerun()
-        
-        if st.button(" Effacer le résumé"):
-            st.session_state.generated_summary = None
-            st.rerun()
-        
-        st.markdown("---")
-        
-        # Guide d'utilisation
-        st.subheader("ℹ Guide d'utilisation")
-        st.markdown("""
-        **Chatbot :**
-        - Posez des questions sur votre cours
-        - Demandez des explications
-        - Obtenez de l'aide personnalisée
-        
-        ** Résumés :**
-        - Résumés adaptés à votre niveau
-        - Par sujet ou complet
-        - Téléchargeable en Markdown
-        
-        ** Exercices :**
-        - Exercices adaptés à votre niveau
-        - Correction automatique
-        - Explications détaillées
-        
-        ** Conseils :**
-        - Soyez précis dans vos questions
-        - Pratiquez régulièrement
-        - Progressez graduellement
-        """)
-    
-    # Interface principale avec onglets
-    if not st.session_state.course_loaded:
-        st.info("👈 Commencez par charger un fichier de cours dans la barre latérale")
+    # Défis récents
+    st.subheader("🔥 Défis Récents")
+    if agent.challenges:
+        recent_challenges = list(agent.challenges.values())[-3:]
+        for challenge in recent_challenges:
+            with st.expander(f"{challenge.title} - {challenge.category}"):
+                st.write(challenge.description)
+                st.caption(f"Créé par: {challenge.creator} | Points: {challenge.points}")
     else:
-        # Onglets principaux
-        tab1, tab2, tab3 = st.tabs(["💬 Chatbot", "📋 Résumés", "📝 Exercices"])
-        
-        with tab1:
-            st.header("💬 Assistant ")
+        st.info("Aucun défi disponible. Créez le premier!")
+
+def show_available_challenges():
+    """Afficher les défis disponibles"""
+    st.header("🎯 Défis Disponibles")
+    
+    # Filtres
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        category_filter = st.selectbox("Catégorie", ["Tous"] + CATEGORIES)
+    with col2:
+        difficulty_filter = st.selectbox("Difficulté", ["Tous"] + DIFFICULTY_LEVELS)
+    with col3:
+        sort_by = st.selectbox("Trier par", ["Date", "Points", "Participants"])
+    
+    # Afficher les défis
+    if agent.challenges:
+        for challenge_id, challenge in agent.challenges.items():
+            # Appliquer les filtres
+            if category_filter != "Tous" and challenge.category != category_filter:
+                continue
+            if difficulty_filter != "Tous" and challenge.difficulty != difficulty_filter:
+                continue
             
-            # Affichage de l'historique des messages
-            for message in st.session_state.messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-            
-            # Zone de saisie du chat
-            if prompt := st.chat_input("Posez votre question sur le cours..."):
-                # Affiche la question de l'utilisateur
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
+            with st.expander(f"{challenge.title} - {challenge.points} points"):
+                col1, col2 = st.columns([2, 1])
                 
-                # Génère et affiche la réponse
-                with st.chat_message("assistant"):
-                    with st.spinner("Réflexion en cours..."):
-                        response = st.session_state.chatbot.generate_response(prompt)
-                    st.markdown(response)
+                with col1:
+                    st.write(f"**Description:** {challenge.description}")
+                    st.write(f"**Catégorie:** {challenge.category}")
+                    st.write(f"**Difficulté:** {challenge.difficulty}")
+                    st.write(f"**Créé par:** {challenge.creator}")
+                    st.write(f"**Participants:** {len(challenge.participants)}")
+                    
+                    if challenge.deadline:
+                        st.write(f"**Date limite:** {challenge.deadline.strftime('%d/%m/%Y')}")
                 
-                # Ajoute la réponse à l'historique
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                with col2:
+                    current_user = st.session_state.current_user
+                    
+                    if current_user not in challenge.participants:
+                        if st.button(f"Rejoindre", key=f"join_{challenge_id}"):
+                            agent.join_challenge(challenge_id, current_user)
+                            st.success("Défi rejoint!")
+                            st.rerun()
+                    else:
+                        st.success("✅ Déjà inscrit")
+                        
+                        # Soumission de solution
+                        st.subheader("📝 Soumettre une solution")
+                        solution = st.text_area("Votre solution", key=f"solution_{challenge_id}")
+                        if st.button("Soumettre", key=f"submit_{challenge_id}"):
+                            agent.submit_solution(challenge_id, current_user, solution)
+                            st.success("Solution soumise!")
+                
+                # Section commentaires
+                st.subheader("💬 Commentaires")
+                for comment in challenge.comments:
+                    st.write(f"**{comment['username']}:** {comment['comment']}")
+                    st.caption(comment['timestamp'].strftime('%d/%m/%Y %H:%M'))
+                
+                # Ajouter un commentaire
+                new_comment = st.text_input("Ajouter un commentaire", key=f"comment_{challenge_id}")
+                if st.button("Publier", key=f"post_{challenge_id}") and new_comment:
+                    agent.add_comment(challenge_id, current_user, new_comment)
+                    st.rerun()
+    else:
+        st.info("Aucun défi disponible. Créez le premier!")
+
+def show_my_challenges():
+    """Afficher mes défis"""
+    st.header("📚 Mes Défis")
+    current_user = st.session_state.current_user
+    
+    # Défis rejoints
+    st.subheader("🎯 Défis Rejoints")
+    my_challenges = [c for c in agent.challenges.values() if current_user in c.participants]
+    
+    if my_challenges:
+        for challenge in my_challenges:
+            with st.expander(f"{challenge.title} - {challenge.points} points"):
+                st.write(challenge.description)
+                
+                # Statut de soumission
+                if current_user in challenge.submissions:
+                    st.success("✅ Solution soumise")
+                    st.write("**Votre solution:**")
+                    st.code(challenge.submissions[current_user]['solution'])
+                else:
+                    st.warning("⏳ En attente de soumission")
+    else:
+        st.info("Vous n'avez rejoint aucun défi.")
+    
+    # Défis créés
+    st.subheader("🎨 Défis Créés par Moi")
+    created_challenges = [c for c in agent.challenges.values() if c.creator == current_user]
+    
+    if created_challenges:
+        for challenge in created_challenges:
+            with st.expander(f"{challenge.title} - {len(challenge.participants)} participants"):
+                st.write(challenge.description)
+                st.write(f"**Participants:** {', '.join(challenge.participants)}")
+                
+                # Afficher les soumissions
+                if challenge.submissions:
+                    st.subheader("📝 Soumissions")
+                    for user, submission in challenge.submissions.items():
+                        st.write(f"**{user}:**")
+                        st.code(submission['solution'])
+    else:
+        st.info("Vous n'avez créé aucun défi.")
+
+def show_create_challenge():
+    """Créer un nouveau défi"""
+    st.header("🎨 Créer un Nouveau Défi")
+    
+    with st.form("create_challenge"):
+        title = st.text_input("Titre du défi*")
+        description = st.text_area("Description détaillée*")
         
-        with tab2:
-            st.header("Générateur de Résumés")
-            
-            # Interface de génération de résumés
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                summary_topic = st.text_input(
-                    " Sujet spécifique (optionnel)",
-                    placeholder="Ex: théorèmes, révolution française, photosynthèse...",
-                    help="Laissez vide pour un résumé complet du cours"
+        col1, col2 = st.columns(2)
+        with col1:
+            category = st.selectbox("Catégorie*", CATEGORIES)
+            difficulty = st.selectbox("Difficulté*", DIFFICULTY_LEVELS)
+        
+        with col2:
+            points = st.number_input("Points à attribuer*", min_value=1, max_value=100, value=10)
+            deadline = st.date_input("Date limite (optionnelle)", value=None)
+        
+        submitted = st.form_submit_button("Créer le Défi")
+        
+        if submitted:
+            if title and description:
+                challenge_id = agent.create_challenge(
+                    title, description, category, difficulty, points, 
+                    st.session_state.current_user, 
+                    datetime.combine(deadline, datetime.min.time()) if deadline else None
                 )
-            
-            with col2:
-                summary_type = st.selectbox(
-                    "Type de résumé",
-                    ['general', 'detaille', 'rapide'],
-                    format_func=lambda x: {
-                        'general': '📖 Général',
-                        'detaille': '🔍 Détaillé', 
-                        'rapide': '⚡ Rapide'
-                    }[x]
-                )
-            
-            # Affichage des caractéristiques selon le niveau
-            st.markdown("###  Caractéristiques du résumé selon votre niveau :")
-            level_config = st.session_state.chatbot.summary_generator.summary_styles[st.session_state.student_level]
-            
+                st.success(f"Défi créé avec succès! ID: {challenge_id}")
+                st.balloons()
+            else:
+                st.error("Veuillez remplir tous les champs obligatoires (*)")
+
+def show_leaderboard():
+    """Afficher le classement"""
+    st.header("🏆 Classement Général")
+    
+    if agent.users:
+        df_leaderboard = agent.get_leaderboard()
+        
+        # Top 3
+        st.subheader("🥇 Podium")
+        if len(df_leaderboard) >= 1:
             col1, col2, col3 = st.columns(3)
-            with col1:
-                st.info(f"**Style :** {level_config['style']}")
-            with col2:
-                st.info(f"**Longueur :** {level_config['length']}")
-            with col3:
-                st.info(f"**Focus :** {level_config['focus'][:50]}...")
             
-            # Bouton de génération
-            if st.button(" Générer un résumé", type="primary"):
-                with st.spinner(f"Génération d'un résumé de niveau {st.session_state.student_level}..."):
-                    summary = st.session_state.chatbot.summary_generator.generate_summary(
-                        st.session_state.chatbot.course_processor,
-                        st.session_state.student_level,
-                        summary_topic if summary_topic.strip() else None,
-                        summary_type
-                    )
-                    
-                    if summary:
-                        st.session_state.generated_summary = summary
-                        st.success("✅ Résumé généré avec succès !")
-                    else:
-                        st.error(" Erreur lors de la génération du résumé. Vérifiez votre cours ou réessayez.")
+            if len(df_leaderboard) >= 2:
+                with col1:
+                    st.metric("🥈 2ème place", 
+                            df_leaderboard.iloc[1]['Utilisateur'], 
+                            f"{df_leaderboard.iloc[1]['Points']} pts")
             
-            # Gestion de la régénération
-            if st.session_state.get('regenerate_summary', False):
-                with st.spinner("Régénération du résumé..."):
-                    summary = st.session_state.chatbot.summary_generator.generate_summary(
-                        st.session_state.chatbot.course_processor,
-                        st.session_state.student_level,
-                        summary_topic if summary_topic.strip() else None,
-                        summary_type
-                    )
-                    
-                    if summary:
-                        st.session_state.generated_summary = summary
-                        st.success("✅ Résumé régénéré !")
-                
-                st.session_state.regenerate_summary = False
+            if len(df_leaderboard) >= 1:
+                with col2:
+                    st.metric("🥇 1ère place", 
+                            df_leaderboard.iloc[0]['Utilisateur'], 
+                            f"{df_leaderboard.iloc[0]['Points']} pts")
             
-            # Affichage du résumé
-            if st.session_state.generated_summary:
-                display_summary(st.session_state.generated_summary)
-            else:
-                st.info("Aucun résumé généré. Cliquez sur 'Générer un résumé' pour commencer.")
+            if len(df_leaderboard) >= 3:
+                with col3:
+                    st.metric("🥉 3ème place", 
+                            df_leaderboard.iloc[2]['Utilisateur'], 
+                            f"{df_leaderboard.iloc[2]['Points']} pts")
         
-        with tab3:
-            st.header(" Générateur d'Exercices")
-            
-            # Interface de génération
-            col1, col2 = st.columns([2, 1])
+        # Tableau complet
+        st.subheader("📊 Classement Complet")
+        st.dataframe(df_leaderboard, use_container_width=True)
+        
+        # Graphique
+        fig = px.bar(df_leaderboard.head(10), x='Utilisateur', y='Points',
+                    title="Top 10 des utilisateurs")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Aucun utilisateur inscrit pour le moment.")
+
+def show_profile():
+    """Afficher le profil utilisateur"""
+    st.header("👤 Mon Profil")
+    current_user = st.session_state.current_user
+    user = agent.users.get(current_user)
+    
+    if user:
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.image("https://via.placeholder.com/150x150/2196F3/white?text=USER", width=150)
+            st.write(f"**Nom:** {user.username}")
+            st.write(f"**Email:** {user.email}")
+            st.write(f"**Membre depuis:** {user.joined_at.strftime('%d/%m/%Y')}")
+        
+        with col2:
+            st.subheader("📊 Statistiques")
+            col1, col2, col3 = st.columns(3)
             
             with col1:
-                topic_filter = st.text_input(
-                    " Sujet spécifique (optionnel)",
-                    placeholder="Ex: théorèmes, révolution française...",
-                    help="Laissez vide pour des exercices sur tout le cours"
-                )
-            
+                st.metric("Points", user.points)
             with col2:
-                num_exercises = st.number_input(
-                    "Nombre d'exercices",
-                    min_value=1,
-                    max_value=10,
-                    value=3
-                )
+                st.metric("Défis Complétés", len(user.challenges_completed))
+            with col3:
+                st.metric("Niveau", user.level)
             
-            # Gestion des exercices basés sur le résumé
-            if st.session_state.get('exercises_from_summary', False):
-                with st.spinner("Génération d'exercices basés sur le résumé..."):
-                    # Utilise le sujet du résumé si disponible
-                    topic_from_summary = st.session_state.generated_summary.get('topic') if st.session_state.generated_summary else None
-                    
-                    exercises = st.session_state.chatbot.exercise_generator.generate_exercises(
-                        st.session_state.chatbot.course_processor,
-                        st.session_state.student_level,
-                        3,
-                        topic_from_summary
-                    )
-                    
-                    if exercises:
-                        st.session_state.generated_exercises = exercises
-                        st.success("✅ Exercices générés à partir du résumé !")
-                
-                st.session_state.exercises_from_summary = False
-            
-            # Bouton de génération
-            if st.button("✨ Générer des exercices", type="primary"):
-                with st.spinner(f"Génération d'exercices de niveau {st.session_state.student_level}..."):
-                    exercises = st.session_state.chatbot.exercise_generator.generate_exercises(
-                        st.session_state.chatbot.course_processor,
-                        st.session_state.student_level,
-                        num_exercises,
-                        topic_filter if topic_filter.strip() else None
-                    )
-                    
-                    if exercises:
-                        st.session_state.generated_exercises = exercises
-                        st.success(f"✅ {len(exercises)} exercice(s) généré(s) !")
-                    else:
-                        st.error("❌ Aucun exercice généré. Vérifiez votre cours ou réessayez.")
-            
-            # Affichage des exercices
-            if st.session_state.generated_exercises:
-                st.markdown("---")
-                st.subheader(f" Exercices - Niveau {st.session_state.student_level.title()}")
-                
-                for i, exercise in enumerate(st.session_state.generated_exercises):
-                    with st.container():
-                        display_exercise(exercise, i)
-                        st.markdown("---")
+            st.subheader("🏅 Badges")
+            if user.badges:
+                for badge in user.badges:
+                    st.write(f"🏆 {badge}")
             else:
-                st.info("Aucun exercice généré. Cliquez sur 'Générer des exercices' pour commencer.")
+                st.info("Aucun badge obtenu pour le moment.")
 
+def show_community():
+    """Afficher la communauté"""
+    st.header("🌍 Communauté")
+    
+    # Statistiques générales
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Utilisateurs", len(agent.users))
+    with col2:
+        st.metric("Défis Actifs", len(agent.challenges))
+    with col3:
+        total_participants = sum(len(c.participants) for c in agent.challenges.values())
+        st.metric("Participations", total_participants)
+    with col4:
+        total_comments = sum(len(c.comments) for c in agent.challenges.values())
+        st.metric("Commentaires", total_comments)
+    
+    # Activité récente
+    st.subheader("📈 Activité Récente")
+    
+    # Simuler une activité récente
+    activities = [
+        "🆕 Alice a créé un nouveau défi 'Algorithme de tri'",
+        "🎯 Bob a rejoint le défi 'Programmation Python'",
+        "💬 Charlie a commenté sur 'Mathématiques avancées'",
+        "✅ Diana a soumis une solution pour 'Art numérique'",
+        "🏆 Eve a gagné le badge 'Premier pas'"
+    ]
+    
+    for activity in activities:
+        st.write(activity)
+        st.caption("Il y a quelques minutes")
+    
+    # Forum de discussion
+    st.subheader("💬 Forum de Discussion")
+    st.info("Fonctionnalité en développement - Forum pour échanger avec la communauté")
 
-# Point d'entrée
 if __name__ == "__main__":
-    main()
+    main() 
