@@ -24,7 +24,7 @@
 ---
 
 ## Architecture:
-![Platform Overview](Architecture_Motivation.png)
+![Platform Overview](attached_assets/Architecture_Motivation.png)
 
 
 
