@@ -1,0 +1,131 @@
+ INTRODUCTION À LA PROGRAMMATION PYTHON
+📘 Chapitre 1 : Les bases de Python
+Python est un langage de programmation :
+
+Interprété (pas besoin de compilation)
+
+De haut niveau (proche du langage humain)
+
+Orienté objet (basé sur des objets et des classes)
+
+Polyvalent (utilisé en développement web, IA, analyse de données, automatisation, etc.)
+
+🔹 Variables et types de données
+Une variable est un nom qui fait référence à une valeur stockée en mémoire.
+
+🔸 Types de base :
+Type	Description	Exemple
+int	Entier	x = 10, y = -3
+float	Nombre à virgule flottante	pi = 3.14
+str	Chaîne de caractères	nom = "Python"
+bool	Booléen (vrai ou faux)	actif = True
+
+python
+Copy
+Edit
+# Exemple :
+age = 25
+nom = "Alice"
+pi = 3.1415
+est_connecte = False
+📝 Remarque : On peut afficher la valeur avec print(), et connaître le type avec type() :
+
+python
+Copy
+Edit
+print(type(nom))  # <class 'str'>
+🔹 Les listes
+Une liste est une structure de données qui peut contenir plusieurs éléments (de types différents).
+
+python
+Copy
+Edit
+fruits = ["pomme", "banane", "orange"]
+notes = [12, 15.5, 18, 9]
+mixte = [1, "Python", True]
+📌 Accès à un élément :
+
+python
+Copy
+Edit
+print(fruits[0])  # "pomme"
+📌 Quelques opérations utiles :
+
+python
+Copy
+Edit
+fruits.append("kiwi")        # Ajouter un élément
+fruits.remove("banane")      # Supprimer un élément
+print(len(fruits))           # Longueur de la liste
+🔹 Les conditions
+Les instructions conditionnelles permettent d’exécuter des blocs de code selon des cas :
+
+python
+Copy
+Edit
+note = 16
+
+if note >= 10:
+    print("Admis")
+else:
+    print("Ajourné")
+🔄 Utilisation de elif (sinon si) :
+
+python
+Copy
+Edit
+if note >= 16:
+    print("Très bien")
+elif note >= 14:
+    print("Bien")
+elif note >= 10:
+    print("Passable")
+else:
+    print("Ajourné")
+🔹 Les boucles
+🔸 La boucle for
+Elle sert à répéter une action un nombre défini de fois.
+
+python
+Copy
+Edit
+for i in range(5):
+    print(i)  # Affiche 0, 1, 2, 3, 4
+🔁 Parcourir une liste :
+
+python
+Copy
+Edit
+fruits = ["pomme", "banane", "kiwi"]
+for fruit in fruits:
+    print(fruit)
+🔸 La boucle while
+Elle s'exécute tant qu'une condition est vraie :
+
+python
+Copy
+Edit
+i = 0
+while i < 5:
+    print(i)
+    i += 1
+🔹 Fonctions
+Une fonction est un bloc de code réutilisable.
+
+python
+Copy
+Edit
+def saluer(nom):
+    print("Bonjour", nom)
+
+saluer("Ilham")
+On peut aussi retourner une valeur :
+
+python
+Copy
+Edit
+def addition(a, b):
+    return a + b
+
+resultat = addition(3, 5)
+print(resultat)  # 8
