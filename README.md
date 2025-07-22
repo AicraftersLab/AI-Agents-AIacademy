@@ -25,6 +25,9 @@ This project is an **AI-powered quiz generator** that creates multiple-choice qu
 
 ---
 
+![Platform Overview](attached_assets/Quiz_Architecture.png)
+
+
 ## 📦 Setup Instructions
 
 1. **Clone the repo**:
