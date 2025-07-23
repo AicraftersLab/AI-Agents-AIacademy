@@ -31,4 +31,48 @@ GEMINI_API_KEY=cle_api_ici
 
 
 
+graph TD
+    A[User] -->|Interacts with| B[User Interface: Streamlit Web App]
+    
+    %% User Interface
+    B -->|Displays| C[Dashboard]
+    B -->|Enables| D[Challenge Creation & Submission]
+    B -->|Manages| E[Team Management]
+    B -->|Hosts| F[Community Forum]
+    B -->|Visualizes| G[Plotly Visualizations]
+    
+    %% Core System
+    B -->|Processes| H[Core System]
+    H -->|Analyzes| I[Profile Analysis]
+    H -->|Forms| J[Team Formation]
+    H -->|Manages| K[Challenge Management]
+    H -->|Collects| L[Feedback Collection]
+    H -->|Stores| M[Session State]
+    
+    %% Data Processing
+    I -->|Uses| N[Pandas & NumPy]
+    J -->|Uses| N
+    K -->|Uses| N
+    L -->|Uses| N
+    
+    %% External Services
+    H -->|Integrates| O[Google Gemini AI]
+    O -->|Generates| P[AI Challenges]
+    O -->|Provides| Q[Personalized Feedback]
+    H -->|Fetches| R[Requests: HTTP Client]
+    
+    %% Configuration & Data
+    H -->|Reads| S[.env File: GEMINI_API_KEY]
+    M -->|Persists| T[User Profiles]
+    M -->|Persists| U[Challenge Data]
+    M -->|Persists| V[Team Data]
+    
+    %% Flow Annotations
+    A -->|Access| B
+    B -->|Sends Data| H
+    H -->|Processes & Returns| B
+    O -->|API Calls| H
+
+
+
 
