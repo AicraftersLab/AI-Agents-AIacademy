@@ -539,7 +539,7 @@ def generate_learning_style_questions_with_groq() -> List[Dict]:
                 "Content-Type": "application/json"
             },
             json={
-                "model": "llama3-70b-8192",  # You can also use "mixtral-8x7b-32768" or "llama2-7b-2048"
+                "model": "llama3-70b-8192",  
                 "messages": [
                     {
                         "role": "system",
