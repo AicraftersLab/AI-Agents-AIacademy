@@ -5,7 +5,6 @@ Agent Social Learning Collaboratif is an interactive web application designed to
 -  Promote Social Learning: Encourage users to learn through collaboration, discussion, and shared challenges.
 -  Personalized Experience: Analyze user profiles to recommend suitable challenges and optimal team pairings.
 -  Community Building: Provide a space for users to interact, comment, and support each other.
--  Scalability: Design a modular and extensible system that can accommodate new features and a growing user base.
 
 # System Overview
 The application is built using Streamlit for the frontend, providing an intuitive and interactive user interface. The backend logic manages challenge creation and participation, team formation, and feedback collection. The system uses session state to persist user and challenge data during interactions. Key features include:
